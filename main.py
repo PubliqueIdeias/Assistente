@@ -1,54 +1,50 @@
+import os
 import requests
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# Suas chaves
-ZAPI_TOKEN = "C9E90B8EAEC425708E3EFA12"
-OPENAI_API_KEY = "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"
+# Função para pegar a resposta da OpenAI
+def get_openai_response(message):
+    headers = {
+        'Authorization': f'Bearer {os.environ.get("OPENAI_API_KEY")}',
+        'Content-Type': 'application/json'
+    }
 
-@app.route('/', methods=['GET'])
-def index():
-    return "🤖 Bot Publique Ideias rodando!"
+    data = {
+        "model": "gpt-3.5-turbo",  # ou gpt-4, se tiver acesso
+        "messages": [{"role": "user", "content": message}],
+        "temperature": 0.7
+    }
 
+    response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=data)
+
+    try:
+        result = response.json()
+        # A resposta da OpenAI pode não ter o campo 'choices' caso haja erro.
+        return result['choices'][0]['message']['content']
+    except Exception as e:
+        print("Erro na resposta da OpenAI:", result)
+        return "Desculpe, houve um erro ao gerar a resposta."
+
+# Rota do webhook que vai receber a mensagem e enviar para a OpenAI
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    data = request.json
-    message = data.get('message', '')
-    sender = data.get('sender', '')
-
-    print(f"📩 Mensagem recebida: {message} de {sender}")
-
-    if message.lower() in ['oi', 'olá', 'bom dia', 'boa tarde', 'boa noite']:
-        resposta = "Olá! Sou o assistente virtual da Publique Ideias. Como posso ajudar?"
-    else:
+    data = request.get_json()
+    
+    if not data or 'message' not in data:
+        return jsonify({'error': 'Mensagem não recebida'}), 400
+    
+    message = data['message']
+    
+    try:
+        # Chama a função para obter a resposta da OpenAI
         resposta = get_openai_response(message)
-
-    send_whatsapp_message(sender, resposta)
-    return jsonify({"status": "mensagem enviada"}), 200
-
-def send_whatsapp_message(phone, text):
-    url = f"https://api.z-api.io/instances/instance0000/token/{ZAPI_TOKEN}/send-text"
-    payload = {
-        "phone": phone,
-        "message": text
-    }
-    requests.post(url, json=payload)
-
-def get_openai_response(user_message):
-    headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    json_data = {
-        "model": "gpt-3.5-turbo",
-        "messages": [
-            {"role": "system", "content": "Você é um assistente inteligente da marca Publique Ideias."},
-            {"role": "user", "content": user_message}
-        ]
-    }
-    response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=json_data)
-    return response.json()['choices'][0]['message']['content']
+        return jsonify({'response': resposta}), 200
+    except Exception as e:
+        print(f"Erro ao processar a mensagem: {e}")
+        return jsonify({'error': 'Erro interno'}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=3000)
+    # A aplicação deve rodar em um ambiente de produção com WSGI, como Gunicorn
+    app.run(debug=True, host='0.0.0.0', port=3000)
